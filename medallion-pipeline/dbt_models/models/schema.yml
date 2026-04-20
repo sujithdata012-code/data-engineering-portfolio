@@ -1,0 +1,67 @@
+version: 2
+
+sources:
+  - name: finance_raw
+    description: Raw financial transaction data from source systems
+    database: finance_db
+    schema: raw
+    tables:
+      - name: transactions
+        description: Raw inbound transactions from payment systems
+        columns:
+          - name: transaction_id
+            description: Unique transaction identifier
+            tests:
+              - not_null
+              - unique
+          - name: amount
+            tests:
+              - not_null
+          - name: currency
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
+
+models:
+  - name: stg_transactions
+    description: Staged and lightly cleaned transactions from raw source
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "amount > 0"
+      - name: currency
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
+
+  - name: fct_daily_transaction_summary
+    description: >
+      Daily aggregated transaction metrics per currency.
+      Powers executive dashboards and regulatory reporting.
+    columns:
+      - name: surrogate_key
+        tests:
+          - not_null
+          - unique
+      - name: transaction_date
+        tests:
+          - not_null
+      - name: total_amount
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "total_amount > 0"
+      - name: transaction_count
+        tests:
+          - not_null
