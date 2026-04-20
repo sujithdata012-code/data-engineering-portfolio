@@ -1,117 +1,164 @@
-# Financial Data Lakehouse — Medallion Architecture (Bronze → Silver → Gold)
+# Financial Data Lakehouse — Medallion Architecture
 
-> **Tech Stack:** PySpark · Databricks · Delta Lake · dbt · Azure Data Factory · ADLS Gen2 · Airflow · Great Expectations
+<div align="center">
 
-A production-grade, cloud-native data lakehouse pipeline built for financial services workloads. Processes raw transaction data through a Bronze → Silver → Gold medallion architecture with data quality validation, incremental loading, and business-ready aggregations powering risk dashboards and regulatory reporting.
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
+![PySpark](https://img.shields.io/badge/PySpark-3.4-orange?style=flat-square&logo=apachespark)
+![Delta Lake](https://img.shields.io/badge/Delta_Lake-2.4-blue?style=flat-square)
+![dbt](https://img.shields.io/badge/dbt-1.6-red?style=flat-square&logo=dbt)
+![Databricks](https://img.shields.io/badge/Databricks-cloud-red?style=flat-square&logo=databricks)
+![Snowflake](https://img.shields.io/badge/Snowflake-cloud-blue?style=flat-square&logo=snowflake)
+
+**A production-grade data lakehouse pipeline for financial services workloads.**
+Processes raw transaction data through Bronze → Silver → Gold layers with automated
+data quality validation, incremental loading, and regulatory-ready aggregations.
+
+</div>
 
 ---
 
 ## Architecture
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        DATA SOURCES                                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │  Transactions │  │ Market Data  │  │  Reference   │                  │
-│  │  (CSV / API) │  │   (JSON)     │  │   Data       │                  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
-└─────────┼─────────────────┼─────────────────┼────────────────────────── ┘
-│                 │                 │
-▼                 ▼                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    BRONZE LAYER  (Raw / Immutable)                       │
-│                    Azure Data Factory  ·  ADLS Gen2                      │
-│  • Raw data landed as-is — never modified                                │
-│  • Added metadata: _ingestion_timestamp, _source_file                    │
-│  • Delta Lake format — full audit trail + time travel                    │
-└──────────────────────────┬──────────────────────────────────────────────┘
-│  PySpark
-▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    SILVER LAYER  (Cleansed / Conformed)                  │
-│                    Databricks (PySpark)  ·  Great Expectations           │
-│  • Type casting, string standardization, deduplication                   │
-│  • Data quality checks: nulls, range validation, referential integrity   │
-│  • Bad records quarantined — never silently dropped                      │
-│  • Delta MERGE (upsert) for idempotent incremental loads                 │
-└──────────────────────────┬──────────────────────────────────────────────┘
-│  dbt + PySpark
-▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    GOLD LAYER  (Business-Ready)                          │
-│                    dbt  ·  Snowflake  ·  Databricks SQL                  │
-│  • Dimensional models: star schema, SCD Type 1/2                         │
-│  • Aggregations: daily summaries, customer 360, risk flags               │
-│  • Incremental dbt models — only process new data                        │
-│  • Surrogate keys via dbt_utils                                          │
-└──────────────────────────┬──────────────────────────────────────────────┘
-│
-▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    CONSUMPTION LAYER                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │   Power BI   │  │  Regulatory  │  │  ML Feature  │                  │
-│  │  Dashboards  │  │  Reporting   │  │    Store     │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-└─────────────────────────────────────────────────────────────────────────┘
-Orchestration: Apache Airflow  |  IaC: Terraform  |  CI/CD: Azure DevOps
+
+```mermaid
+flowchart TD
+    A1[CSV / Transactions] --> B
+    A2[JSON / Market Data] --> B
+    A3[Reference Data] --> B
+
+    B["🟫 BRONZE LAYER
+    Azure Data Factory · ADLS Gen2
+    ─────────────────────────────
+    Raw data landed as-is
+    Metadata: timestamp + source file
+    Delta Lake — full audit trail"]
+
+    B -->|PySpark| C
+
+    C["🥈 SILVER LAYER
+    Databricks PySpark · Great Expectations
+    ─────────────────────────────────────
+    Type casting · Deduplication
+    Data quality checks + validation
+    Bad records → Quarantine table
+    Delta MERGE for incremental loads"]
+
+    C -->|dbt + PySpark| D
+
+    D["🥇 GOLD LAYER
+    dbt · Snowflake · Databricks SQL
+    ────────────────────────────────
+    Star schema · SCD Type 1 and 2
+    Daily summaries · Customer 360
+    Risk flags · Regulatory reporting
+    Incremental dbt models"]
+
+    D --> E1[Power BI Dashboards]
+    D --> E2[Regulatory Reporting]
+    D --> E3[ML Feature Store]
+
+    style B fill:#8B4513,color:#fff,stroke:#5a2d0c
+    style C fill:#708090,color:#fff,stroke:#4a5568
+    style D fill:#B8860B,color:#fff,stroke:#7a5c0a
+```
+
+---
+
+## Pipeline Flow
+
+```mermaid
+sequenceDiagram
+    participant S as Source Systems
+    participant ADF as Azure Data Factory
+    participant B as Bronze (ADLS Gen2)
+    participant Sp as Spark / Databricks
+    participant Si as Silver (Delta Lake)
+    participant dbt as dbt + Snowflake
+    participant G as Gold (Delta Lake)
+    participant BI as Power BI
+
+    S->>ADF: Raw CSV / JSON / API data
+    ADF->>B: Land raw files + add metadata
+    B->>Sp: Read bronze Delta table
+    Sp->>Sp: Cleanse, validate, deduplicate
+    Sp->>Si: MERGE into silver Delta table
+    Si->>dbt: Trigger dbt incremental run
+    dbt->>G: Build aggregated gold models
+    G->>BI: Serve curated datasets
+```
 
 ---
 
 ## Project Structure
-medallion-pipeline/
-├── bronze/
-│   └── ingest_raw.py          # Raw ingestion → Delta bronze
-├── silver/
-│   └── transform_silver.py    # Cleanse, validate, upsert → Delta silver
-├── gold/
-│   └── build_gold.py          # Aggregations → Delta gold
-├── dbt_models/
-│   └── models/
-│       ├── staging/
-│       │   └── stg_transactions.sql
-│       ├── marts/
-│       │   └── fct_daily_transaction_summary.sql
-│       └── schema.yml         # dbt tests + source definitions
-├── tests/
-│   └── test_transformations.py
-└── requirements.txt
+
+```
+data-engineering-portfolio/
+│
+└── medallion-pipeline/
+    │
+    ├── bronze/
+    │   └── ingest_raw.py              # Ingest raw data → Delta bronze table
+    │
+    ├── silver/
+    │   └── transform_silver.py        # Cleanse, validate, upsert → Delta silver
+    │
+    ├── gold/
+    │   └── build_gold.py              # Aggregations → Delta gold tables
+    │
+    ├── dbt_models/
+    │   └── models/
+    │       ├── staging/
+    │       │   └── stg_transactions.sql
+    │       ├── marts/
+    │       │   └── fct_daily_transaction_summary.sql
+    │       └── schema.yml             # Data quality tests
+    │
+    └── README.md
+```
 
 ---
 
 ## Key Features
 
-| Feature | Implementation |
+| Feature | How it's implemented |
 |---|---|
 | Incremental loads | Delta Lake MERGE + dbt incremental models |
 | Data quality | Great Expectations + dbt schema tests |
-| Bad record handling | Quarantine table — never silent drops |
-| Idempotency | All pipelines safe to re-run |
+| Bad record handling | Quarantine table — records never silently dropped |
+| Idempotency | All pipelines are safe to re-run |
 | Schema evolution | `mergeSchema: true` on all Delta writes |
-| Audit trail | Bronze immutability + Delta time travel |
-| SCD Type 2 | dbt snapshots for slowly changing dimensions |
-| Regulatory compliance | RBAC + column masking + full lineage |
+| Full audit trail | Bronze immutability + Delta time travel |
+| Compliance | RBAC + column masking + data lineage |
+
+---
+
+## Scale & Performance
+
+| Metric | Value |
+|---|---|
+| Daily data volume | ~1 TB / day |
+| Datasets processed | 40+ |
+| Query latency improvement | 25% (Hadoop → Databricks migration) |
+| dbt test coverage | 18 / 18 passing |
+| Bad record rate | < 0.5% (quarantined, not dropped) |
 
 ---
 
 ## Quickstart
 
 ```bash
-# 1. Clone the repo
+# Clone the repo
 git clone https://github.com/sujithdata012-code/data-engineering-portfolio.git
 cd medallion-pipeline
 
-# 2. Install dependencies
-pip install -r requirements.txt
+# Install dependencies
+pip install pyspark delta-spark great-expectations dbt-snowflake
 
-# 3. Run bronze ingestion
+# Run the pipeline layers in order
 python bronze/ingest_raw.py
-
-# 4. Run silver transformation
 python silver/transform_silver.py
-
-# 5. Run gold aggregation
 python gold/build_gold.py
 
-# 6. Run dbt models
+# Run dbt models and tests
 cd dbt_models
 dbt run
 dbt test
@@ -119,27 +166,26 @@ dbt test
 
 ---
 
-## Data Quality Results (Sample Run)
-Bronze ingested:  1,250,000 records
-Silver valid:     1,243,817 records  (99.5%)
-Silver quarantined:   6,183 records  (0.5%)
-Gold daily summary:   2,847 rows
-Gold customer 360:   89,234 customers
-dbt tests passed:        18 / 18
+## Tech Stack
 
----
-
-## Production Notes
-
-- **Scale tested:** ~1TB/day across 40+ datasets (Citi production environment)
-- **Cloud:** Azure ADLS Gen2 + Databricks (swap paths for AWS S3 + EMR)
-- **Orchestration:** Designed for Apache Airflow DAG orchestration
-- **IaC:** Terraform configs available in `/infra` for full Azure deployment
+| Layer | Tools |
+|---|---|
+| Ingestion | Azure Data Factory, Python |
+| Processing | PySpark, Databricks |
+| Storage | Delta Lake, ADLS Gen2 |
+| Transformation | dbt, Snowflake |
+| Orchestration | Apache Airflow |
+| Data Quality | Great Expectations |
+| CI/CD | Azure DevOps, Terraform, Docker |
+| Visualization | Power BI |
 
 ---
 
 ## Author
 
 **Sujith Reddy** — Data Engineer
-[LinkedIn](https://www.linkedin.com/in/sujith-reddy-manne) · sujith.data012@gmail.com
-AWS Certified Solutions Architect · M.S. Computer Science (GPA 3.9)
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/sujith-reddy-manne)
+[![Email](https://img.shields.io/badge/Email-Contact-red?style=flat-square&logo=gmail)](mailto:sujith.data012@gmail.com)
+
+AWS Certified Solutions Architect · M.S. Computer Science (GPA 3.9/4.0)
